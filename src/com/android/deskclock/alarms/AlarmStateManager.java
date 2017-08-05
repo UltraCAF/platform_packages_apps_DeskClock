@@ -152,11 +152,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
     private static StateChangeScheduler sStateChangeScheduler =
             new AlarmManagerStateChangeScheduler();
 
-    private static final String ACTION_POWER_ON_ALERT =
-            "org.codeaurora.poweronalert.action.POWER_ON_ALERT";
-    private static final String ACTION_POWER_OFF =
-            "org.codeaurora.poweronalert.action.ALARM_POWER_OFF";
-
     private static Calendar getCurrentTime() {
         return sCurrentTimeFactory == null ?
                 Calendar.getInstance() : sCurrentTimeFactory.getCurrentTime();
@@ -201,9 +196,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
      */
     public static void updateNextAlarm(Context context) {
         final AlarmInstance nextAlarm = getNextFiringAlarm(context);
-        if (nextAlarm != null) {
-            schedulePowerOffAlarmInstanceStateChange(context, nextAlarm);
-        }
 
         if (Utils.isPreL()) {
             updateNextAlarmInSystemSettings(context, nextAlarm);
@@ -360,11 +352,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
         sStateChangeScheduler.scheduleInstanceStateChange(ctx, time, instance, newState);
     }
 
-    private static void schedulePowerOffAlarmInstanceStateChange(Context ctx,
-            AlarmInstance instance) {
-        sStateChangeScheduler.schedulePowerOffAlarmInstanceStateChange(ctx, instance);
-    }
-
     /**
      * Cancel all {@link AlarmManager} timers for instance.
      *
@@ -375,10 +362,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
         sStateChangeScheduler.cancelScheduledInstanceStateChange(ctx, instance);
     }
 
-    private static void cancelSchedulePowerOffAlarmInstanceStateChange(Context ctx,
-            AlarmInstance instance) {
-        sStateChangeScheduler.cancelSchedulePowerOffAlarmInstanceStateChange(ctx, instance);
-    }
 
     /**
      * This will set the alarm instance to the SILENT_STATE and update
@@ -552,10 +535,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
 
         // Instance time changed, so find next alarm that will fire and notify system
         updateNextAlarm(context);
-
-        if (isAlarmBoot()) {
-            context.sendBroadcast(new Intent(ACTION_POWER_OFF));
-        }
     }
 
     public static int getSnoozedMinutes(Context context) {
@@ -635,11 +614,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
         instance.mAlarmState = AlarmInstance.DISMISSED_STATE;
         final ContentResolver contentResolver = context.getContentResolver();
         AlarmInstance.updateInstance(contentResolver, instance);
-
-        if (isAlarmBoot()) {
-            context.startActivity(new Intent(ACTION_POWER_ON_ALERT)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-        }
     }
 
     /**
@@ -680,7 +654,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
         AlarmService.stopAlarm(context, instance);
         AlarmNotifications.clearNotification(context, instance);
         cancelScheduledInstanceStateChange(context, instance);
-        cancelSchedulePowerOffAlarmInstanceStateChange(context, instance);
         setDismissState(context, instance);
     }
 
@@ -907,9 +880,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
                 break;
             case AlarmInstance.MISSED_STATE:
                 setMissedState(context, instance);
-                if (isAlarmBoot()) {
-                    context.sendBroadcast(new Intent(ACTION_POWER_OFF));
-                }
                 break;
             case AlarmInstance.PREDISMISSED_STATE:
                 setPreDismissState(context, instance);
@@ -1040,11 +1010,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
                 AlarmInstance instance, int newState);
 
         void cancelScheduledInstanceStateChange(Context context, AlarmInstance instance);
-
-        void schedulePowerOffAlarmInstanceStateChange(Context context, AlarmInstance instance);
-
-        void cancelSchedulePowerOffAlarmInstanceStateChange(Context context,
-                AlarmInstance instance);
     }
 
     /**
@@ -1083,34 +1048,6 @@ public final class AlarmStateManager extends BroadcastReceiver {
                 pendingIntent.cancel();
             }
         }
-
-        @Override
-        public void schedulePowerOffAlarmInstanceStateChange(Context context,
-                AlarmInstance instance) {
-            Intent stateChangePowerOffIntent = createStateChangeIntent(context, ALARM_MANAGER_TAG,
-                    instance, AlarmInstance.POWER_OFF_ALARM_STATE);
-            PendingIntent pendingPowerOffIntent = PendingIntent.getService(context,
-                    instance.hashCode(), stateChangePowerOffIntent, PendingIntent.FLAG_ONE_SHOT);
-
-            final AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            am.setExact(AlarmManager_Wrapper.RTC_POWEROFF_WAKEUP, instance.getAlarmTime().getTimeInMillis(),
-                    pendingPowerOffIntent);
-        }
-
-        @Override
-        public void cancelSchedulePowerOffAlarmInstanceStateChange(Context context,
-                AlarmInstance instance) {
-            PendingIntent pendingPowerOffIntent = PendingIntent.getService(context,
-                    instance.hashCode(),
-                    createStateChangeIntent(context, ALARM_MANAGER_TAG, instance, null),
-                    PendingIntent.FLAG_ONE_SHOT);
-
-            if (pendingPowerOffIntent != null) {
-                AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-                am.cancel(pendingPowerOffIntent);
-                pendingPowerOffIntent.cancel();
-            }
-        }
     }
 
     /**
@@ -1137,21 +1074,7 @@ public final class AlarmStateManager extends BroadcastReceiver {
         if (alarmState >= 0) {
             setAlarmState(context, instance, alarmState);
         } else {
-            // No need to register instance again when alarmState
-            // equals POWER_OFF_ALARM_STATE. POWER_OFF_ALARM_STATE
-            // is an invalid state for rtc power off alarm.
-            if (alarmState == AlarmInstance.POWER_OFF_ALARM_STATE) {
-                return;
-            }
-
             registerInstance(context, instance, true);
         }
-    }
-
-    /*
-     * Check if it is alarm boot
-     */
-    public static boolean isAlarmBoot () {
-       return SystemProperties_Wrapper.getBoolean("ro.alarm_boot", false);
     }
 }
